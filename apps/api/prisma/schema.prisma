@@ -1,0 +1,397 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  RESTRICTED
+  SUSPENDED
+  DELETED
+
+  @@map("user_status")
+}
+
+enum UserRole {
+  DRIVER
+  WORKER
+  STATION_MANAGER
+  SUPPORT_AGENT
+  PLATFORM_ADMIN
+
+  @@map("user_role")
+}
+
+enum VehicleType {
+  CAR
+  MOTORCYCLE
+  TAXI
+  MINIBUS
+  BUS
+  TRUCK
+  OTHER
+
+  @@map("vehicle_type")
+}
+
+enum StationApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+
+  @@map("station_approval_status")
+}
+
+enum StationOperatingStatus {
+  OPEN
+  CLOSED
+  PAUSED
+  EMERGENCY_CLOSED
+
+  @@map("station_operating_status")
+}
+
+enum PumpStatus {
+  AVAILABLE
+  RESERVED
+  IN_USE
+  OFFLINE
+  MAINTENANCE
+  OUT_OF_FUEL
+  PAUSED
+
+  @@map("pump_status")
+}
+
+enum InventoryStatus {
+  AVAILABLE
+  LOW
+  OUT_OF_STOCK
+  UNKNOWN
+
+  @@map("inventory_status")
+}
+
+enum InventoryTransactionType {
+  INITIAL_STOCK
+  REFILL
+  SALE
+  CORRECTION
+  LOSS
+
+  @@map("inventory_transaction_type")
+}
+
+enum QueueEntryStatus {
+  WAITING
+  PREPARE_TO_LEAVE
+  TRAVELLING
+  NEAR_STATION
+  CHECKED_IN
+  SKIPPED
+  ASSIGNED_TO_PUMP
+  FUELING
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  STATION_CANCELLED
+
+  @@map("queue_entry_status")
+}
+
+enum PumpAssignmentStatus {
+  RESERVED
+  ARRIVED
+  IN_SERVICE
+  COMPLETED
+  CANCELLED
+
+  @@map("pump_assignment_status")
+}
+
+model User {
+  id                String              @id @default(uuid()) @db.Uuid
+  phoneNumber       String              @unique @map("phone_number")
+  phoneVerifiedAt   DateTime?           @map("phone_verified_at") @db.Timestamptz(6)
+  preferredLanguage String              @default("en") @map("preferred_language") @db.VarChar(8)
+  status            UserStatus          @default(ACTIVE)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  roles             UserRoleAssignment[]
+  vehicles          Vehicle[]
+  otpChallenges     AuthOtpChallenge[]
+  sessions          AuthSession[]
+  ownedStations     Station[]           @relation("station_owner")
+  stationAssignments StationWorker[]
+  queueEntries       QueueEntry[]
+  pumpAssignments    PumpAssignment[]
+  fuelTransactions   FuelTransaction[]
+
+  @@map("users")
+}
+
+model Station {
+  id                String                  @id @default(uuid()) @db.Uuid
+  ownerUserId       String                  @map("owner_user_id") @db.Uuid
+  name              String                  @db.VarChar(160)
+  address           String
+  latitude          Decimal                 @db.Decimal(9, 6)
+  longitude         Decimal                 @db.Decimal(9, 6)
+  entranceLatitude  Decimal?                @map("entrance_latitude") @db.Decimal(9, 6)
+  entranceLongitude Decimal?                @map("entrance_longitude") @db.Decimal(9, 6)
+  approvalStatus    StationApprovalStatus   @default(PENDING) @map("approval_status")
+  operatingStatus   StationOperatingStatus  @default(CLOSED) @map("operating_status")
+  timezone          String                  @default("Africa/Addis_Ababa") @db.VarChar(64)
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  owner             User                    @relation("station_owner", fields: [ownerUserId], references: [id])
+  workers           StationWorker[]
+  pumps             Pump[]
+  inventory         FuelInventory[]
+  queueEntries      QueueEntry[]
+  fuelTransactions  FuelTransaction[]
+
+  @@map("stations")
+}
+
+model StationWorker {
+  stationId String   @map("station_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  station   Station  @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@id([stationId, userId])
+  @@map("station_workers")
+}
+
+model FuelType {
+  id          String          @id @default(uuid()) @db.Uuid
+  code        String          @unique @db.VarChar(32)
+  displayName String          @map("display_name") @db.VarChar(80)
+  isActive    Boolean         @default(true) @map("is_active")
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  pumpTypes   PumpFuelType[]
+  inventory   FuelInventory[]
+  queueEntries QueueEntry[]
+  fuelTransactions FuelTransaction[]
+
+  @@map("fuel_types")
+}
+
+model Pump {
+  id          String     @id @default(uuid()) @db.Uuid
+  stationId   String     @map("station_id") @db.Uuid
+  name        String     @db.VarChar(80)
+  capacity    Int
+  status      PumpStatus @default(AVAILABLE)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  station     Station    @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  fuelTypes   PumpFuelType[]
+  assignments PumpAssignment[]
+  fuelTransactions FuelTransaction[]
+
+  @@unique([stationId, name])
+  @@map("pumps")
+}
+
+model PumpFuelType {
+  pumpId     String   @map("pump_id") @db.Uuid
+  fuelTypeId String   @map("fuel_type_id") @db.Uuid
+  pump       Pump     @relation(fields: [pumpId], references: [id], onDelete: Cascade)
+  fuelType   FuelType @relation(fields: [fuelTypeId], references: [id])
+
+  @@id([pumpId, fuelTypeId])
+  @@map("pump_fuel_types")
+}
+
+model FuelInventory {
+  id                       String          @id @default(uuid()) @db.Uuid
+  stationId                String          @map("station_id") @db.Uuid
+  fuelTypeId               String          @map("fuel_type_id") @db.Uuid
+  estimatedQuantityLitres  Decimal         @default(0) @map("estimated_quantity_litres") @db.Decimal(14, 3)
+  lowStockThresholdLitres  Decimal         @default(0) @map("low_stock_threshold_litres") @db.Decimal(14, 3)
+  status                   InventoryStatus @default(UNKNOWN)
+  updatedAt                DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  station                  Station         @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  fuelType                 FuelType        @relation(fields: [fuelTypeId], references: [id])
+  transactions             InventoryTransaction[]
+
+  @@unique([stationId, fuelTypeId])
+  @@map("fuel_inventory")
+}
+
+model UserRoleAssignment {
+  userId    String   @map("user_id") @db.Uuid
+  role      UserRole
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@map("user_roles")
+}
+
+model Vehicle {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  plateNumber     String      @map("plate_number") @db.VarChar(64)
+  plateNormalized String      @unique @map("plate_normalized") @db.VarChar(64)
+  vehicleType     VehicleType @map("vehicle_type")
+  make            String?     @db.VarChar(100)
+  model           String?     @db.VarChar(100)
+  color           String?     @db.VarChar(64)
+  isActive        Boolean     @default(true) @map("is_active")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user            User        @relation(fields: [userId], references: [id], onDelete: Restrict)
+  queueEntries    QueueEntry[]
+  fuelTransactions FuelTransaction[]
+
+  @@index([userId])
+  @@map("vehicles")
+}
+
+model AuthOtpChallenge {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  codeHash   String    @map("code_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_otp_challenges")
+}
+
+model AuthSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique @map("refresh_token_hash") @db.Char(64)
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("auth_sessions")
+}
+
+model QueueEntry {
+  id                 String           @id @default(uuid()) @db.Uuid
+  userId             String           @map("user_id") @db.Uuid
+  vehicleId          String           @map("vehicle_id") @db.Uuid
+  stationId          String           @map("station_id") @db.Uuid
+  fuelTypeId         String           @map("fuel_type_id") @db.Uuid
+  joinedAt           DateTime         @default(now()) @map("joined_at") @db.Timestamptz(6)
+  priorityScore      Int              @default(0) @map("priority_score")
+  status             QueueEntryStatus @default(WAITING)
+  checkedInAt        DateTime?        @map("checked_in_at") @db.Timestamptz(6)
+  completedAt        DateTime?        @map("completed_at") @db.Timestamptz(6)
+  cancelledAt        DateTime?        @map("cancelled_at") @db.Timestamptz(6)
+  cancellationReason String?          @map("cancellation_reason")
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user               User             @relation(fields: [userId], references: [id])
+  vehicle            Vehicle          @relation(fields: [vehicleId], references: [id])
+  station            Station          @relation(fields: [stationId], references: [id])
+  fuelType           FuelType         @relation(fields: [fuelTypeId], references: [id])
+  history            QueueStatusHistory[]
+  assignments        PumpAssignment[]
+  fuelTransaction    FuelTransaction?
+
+  @@map("queue_entries")
+}
+
+model QueueStatusHistory {
+  id           String           @id @default(uuid()) @db.Uuid
+  queueEntryId String           @map("queue_entry_id") @db.Uuid
+  fromStatus   QueueEntryStatus? @map("from_status")
+  toStatus     QueueEntryStatus @map("to_status")
+  actorId      String?          @map("actor_id") @db.Uuid
+  reason       String?
+  metadata     Json             @default("{}")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  queueEntry   QueueEntry       @relation(fields: [queueEntryId], references: [id], onDelete: Cascade)
+
+  @@map("queue_status_history")
+}
+
+model PumpAssignment {
+  id           String               @id @default(uuid()) @db.Uuid
+  queueEntryId String               @map("queue_entry_id") @db.Uuid
+  pumpId       String               @map("pump_id") @db.Uuid
+  workerId     String?              @map("worker_id") @db.Uuid
+  assignedAt   DateTime             @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  serviceStartedAt DateTime?        @map("service_started_at") @db.Timestamptz(6)
+  serviceCompletedAt DateTime?      @map("service_completed_at") @db.Timestamptz(6)
+  status       PumpAssignmentStatus @default(RESERVED)
+  queueEntry   QueueEntry           @relation(fields: [queueEntryId], references: [id])
+  pump         Pump                 @relation(fields: [pumpId], references: [id])
+  worker       User?                @relation(fields: [workerId], references: [id])
+
+  @@map("pump_assignments")
+}
+
+model InventoryTransaction {
+  id              String                   @id @default(uuid()) @db.Uuid
+  stationId       String                   @map("station_id") @db.Uuid
+  fuelTypeId      String                   @map("fuel_type_id") @db.Uuid
+  transactionType InventoryTransactionType @map("transaction_type")
+  quantityLitres  Decimal                  @map("quantity_litres") @db.Decimal(14, 3)
+  referenceId     String?                  @map("reference_id") @db.Uuid
+  recordedBy      String                   @map("recorded_by") @db.Uuid
+  note            String?
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  inventory       FuelInventory?           @relation(fields: [stationId, fuelTypeId], references: [stationId, fuelTypeId])
+
+  @@map("inventory_transactions")
+}
+
+model FuelTransaction {
+  id              String      @id @default(uuid()) @db.Uuid
+  queueEntryId    String      @unique @map("queue_entry_id") @db.Uuid
+  stationId       String      @map("station_id") @db.Uuid
+  pumpId          String      @map("pump_id") @db.Uuid
+  workerId        String?     @map("worker_id") @db.Uuid
+  vehicleId       String      @map("vehicle_id") @db.Uuid
+  fuelTypeId      String      @map("fuel_type_id") @db.Uuid
+  quantityLitres  Decimal     @map("quantity_litres") @db.Decimal(14, 3)
+  unitPrice       Decimal?    @map("unit_price") @db.Decimal(14, 4)
+  totalValue      Decimal?    @map("total_value") @db.Decimal(14, 4)
+  startedAt       DateTime?   @map("started_at") @db.Timestamptz(6)
+  completedAt     DateTime    @map("completed_at") @db.Timestamptz(6)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  queueEntry      QueueEntry  @relation(fields: [queueEntryId], references: [id])
+  station         Station     @relation(fields: [stationId], references: [id])
+  pump            Pump        @relation(fields: [pumpId], references: [id])
+  worker          User?       @relation(fields: [workerId], references: [id])
+  vehicle         Vehicle     @relation(fields: [vehicleId], references: [id])
+  fuelType        FuelType    @relation(fields: [fuelTypeId], references: [id])
+
+  @@map("fuel_transactions")
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  route          String   @db.VarChar(160)
+  idempotencyKey String   @map("idempotency_key") @db.Uuid
+  requestHash    String   @map("request_hash") @db.Char(64)
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  expiresAt      DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([userId, route, idempotencyKey])
+  @@map("idempotency_records")
+}
