@@ -1,0 +1,15 @@
+packages:
+  - apps/api
+  - apps/background-worker
+  - apps/station-dashboard
+  - apps/admin-dashboard
+  - packages/*
+
+onlyBuiltDependencies:
+  - '@prisma/client'
+  - '@prisma/engines'
+  - '@scarf/scarf'
+  - esbuild
+  - msgpackr-extract
+  - prisma
+  - sharp
